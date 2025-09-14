@@ -52,3 +52,9 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+*.bin
+.vs/alang/CopilotIndices
+.vs/alang/FileContentIndex
+.vs/alang/copilot-chat
+.vs/alang/v17
+.vs/alang/DesignTimeBuild
