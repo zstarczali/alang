@@ -114,7 +114,7 @@ public class EvalVisitor : LispBaseVisitor<Value>
         return val;
     }
 
-    // ----- QUOTE -----
+    // ----- QUOTE (rövid) -----
     public override Value VisitQuoteExpr(LispParser.QuoteExprContext ctx)
         => BuildQuoted(ctx.datum());
 
@@ -135,26 +135,23 @@ public class EvalVisitor : LispBaseVisitor<Value>
         return new ListVal(items);
     }
 
-    // Általános quote építés expr-ből a hosszú (quote …) formához
+    // Általános quote építés expr-ből (hosszú forma: (quote expr))
     private Value BuildQuotedFromExpr(LispParser.ExprContext e)
     {
-        // rövid quote: 'expr  →  (quote expr)
-        // Itt biztonságosan felismerjük úgy, hogy az első gyerek egyetlen `'` token.
+        // rövid quote: 'expr → (quote expr)
         if (e.ChildCount >= 2 && e.GetChild(0).GetText() == "'"
             && e.GetChild(1) is LispParser.ExprContext innerQuoted)
         {
             return new ListVal(new List<Value> {
-            new SymVal("quote"),
-            BuildQuotedFromExpr(innerQuoted)
-        });
+                new SymVal("quote"),
+                BuildQuotedFromExpr(innerQuoted)
+            });
         }
 
-        // szám, string, szimbólum
         if (e.number() != null) return VisitNumber(e.number());
         if (e.str() != null) return VisitStr(e.str());
         if (e.symbol() != null) return new SymVal(e.symbol().ID().GetText());
 
-        // lista: a benne levő expr-eket rekurzívan, mint ADAT (nem kód) képezzük le
         if (e.list() != null)
         {
             var l = e.list();
@@ -172,7 +169,7 @@ public class EvalVisitor : LispBaseVisitor<Value>
         throw new Exception("Quote-olhatatlan kifejezés.");
     }
 
-    // ----- LET -----
+    // ----- LET (külön szabály) -----
     public override Value VisitLetForm(LispParser.LetFormContext ctx)
     {
         var locals = new Dictionary<string, Value>(StringComparer.Ordinal);
@@ -198,12 +195,15 @@ public class EvalVisitor : LispBaseVisitor<Value>
         if (ctx.ChildCount == 2)
             return new ListVal(new List<Value>());
 
+        // FONTOS: ha ez a 'list' valójában a letForm alternatíva, delegáljunk!
+        if (ctx.letForm() != null)
+            return Visit(ctx.letForm());
+
         var headText = ctx.ChildCount > 1 ? ctx.GetChild(1).GetText() : "";
 
         // hosszú quote: (quote expr)
         if (headText == "quote")
         {
-            // grammar szerint: '(' 'quote' expr ')'
             var q = ctx.expr(0);
             return BuildQuotedFromExpr(q);
         }
@@ -323,7 +323,7 @@ public class EvalVisitor : LispBaseVisitor<Value>
             return Invoke(fn, argVals);
         }
 
-        // általános hívás
+        // általános hívás: (head-expr arg*)
         if (ctx.expr().Length >= 1)
         {
             var head = Visit(ctx.expr(0));
@@ -334,7 +334,7 @@ public class EvalVisitor : LispBaseVisitor<Value>
         }
 
         // Részletesebb hiba
-        throw new Exception($"Ismeretlen listaforma: {ctx.GetText()}");
+        throw new Exception($"Ismeretlen listaforma: {ctx.GetText()} @ line {ctx.Start.Line}, col {ctx.Start.Column}");
     }
 
     private Value DivChain(LispParser.ExprContext[] es)

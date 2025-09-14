@@ -4,51 +4,50 @@
 using Antlr4.Runtime;
 
 var input = """
-        ; --- const ---
-        (const PI 314)
-        (print PI)              ; 314
-
-        ; --- let ---
-        (let ((x 2) (y 3))
-          (print (+ x y))       ; 5
-          (* x y))              ; 6
-
-        ; --- quote ---
+        ; Quote adat
         (print '(1 2 3))
         (print '(a b c))
         (print '())
-        (print 'hello)
+        (print (quote (x y z)))
 
-        ; --- logikaiak ---
-        (print (and 1 2 3))     ; 1
-        (print (and 1 0 3))     ; 0
-        (print (or 0 0 5))      ; 1
-        (print (or 0 0 0))      ; 0
-        (print (not 0))         ; 1
-        (print (not 7))         ; 0
+        ; Üres lista kifejezésként is
+        (print ())            ; -> ()
 
-        ; --- aritmetika ---
-        (print (+ 1 2 3))       ; 6
-        (print (- 10 3 2))      ; 5
-        (print (- 7))           ; -7
-        (print (* 2 3 4))       ; 24
-        (print (/ 20 2 2))      ; 5
+        ; Logikaiak
+        (print (and 1 2 3))
+        (print (or 0 0 0))
+        (print (not 0))
 
-        ; --- while + set ---
-        (set x 0)
-        (while (< x 3)
-          (print x)
-          (set x (+ x 1))
+        ; Aritmetika
+        (print (+ 1 2 3))
+        (print (- 10 3 2))
+        (print (* 2 3 4))
+        (print (/ 20 2 2))
+
+        ; Let és Const
+        (const PI 314)
+        (print PI)
+        (let ((x 2) (y 3))
+          (print (+ x y))
+          (* x y))
+
+        ; Lambda / Defun / While
+        (defun inc (n) (+ n 1))
+        (print (inc 41))
+
+        (set i 0)
+        (while (< i 3)
+          (print i)
+          (set i (+ i 1))
         )
 
-        ; --- defun + lambda + rekurzió ---
         (defun fact (n)
           (if (<= n 1)
               1
               (* n (fact (- n 1)))))
-        (print (fact 5))        ; 120
+        (print (fact 5))
 
-        (print ((lambda (y) (+ y 5)) 7))  ; 12
+        (print ((lambda (a) (+ a 5)) 7))
         """;
 
 
