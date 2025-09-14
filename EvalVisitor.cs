@@ -2,213 +2,293 @@
 using System.Collections.Generic;
 using System.Linq;
 
-public class EvalVisitor : LispBaseVisitor<int>
+// ----- ÉRTÉKTÍPUSOK -----
+public abstract record Value;
+public record IntVal(int V) : Value;
+public record StrVal(string V) : Value;
+public record SymVal(string Name) : Value;
+public record ListVal(List<Value> Items) : Value;
+public record FuncVal(
+    List<string> Params,
+    List<LispParser.ExprContext> Body,
+    Dictionary<string, Value> Closure
+) : Value;
+
+public class EvalVisitor : LispBaseVisitor<Value>
 {
-    // Környezet-verem: lokális scope-ok kezelésére (legfelül az aktuális)
-    private readonly Stack<Dictionary<string, int>> envStack = new();
-
-    // Függvények: név -> (paraméterlista, body-expr lista)
-    private readonly Dictionary<string, (List<string> Params, List<LispParser.ExprContext> Body)> funcs
-        = new(StringComparer.Ordinal);
-
-    bool ToBool(int v) => v != 0;
-    int Bool(bool b) => b ? 1 : 0;
+    private readonly Stack<Dictionary<string, Value>> envStack = new();
+    private readonly Dictionary<string, FuncVal> funcs = new(StringComparer.Ordinal);
 
     public EvalVisitor()
     {
-        // Globális környezet
-        envStack.Push(new Dictionary<string, int>(StringComparer.Ordinal));
+        envStack.Push(new Dictionary<string, Value>(StringComparer.Ordinal));
+        envStack.Peek()["nil"] = new ListVal(new List<Value>()); // alap üres lista
     }
 
-    private Dictionary<string, int> Env => envStack.Peek();
+    private Dictionary<string, Value> Env => envStack.Peek();
 
-    public override int VisitProg(LispParser.ProgContext ctx)
+    private bool TryGetVar(string name, out Value value)
     {
-        int last = 0;
+        foreach (var scope in envStack)
+            if (scope.TryGetValue(name, out value))
+                return true;
+        value = new IntVal(0);
+        return false;
+    }
+
+    private void SetVar(string name, Value value)
+    {
+        foreach (var scope in envStack)
+            if (scope.ContainsKey(name)) { scope[name] = value; return; }
+        Env[name] = value;
+    }
+
+    private Dictionary<string, Value> SnapshotCurrentEnv()
+    {
+        var snap = new Dictionary<string, Value>(StringComparer.Ordinal);
+        foreach (var scope in envStack.Reverse())
+            foreach (var kv in scope)
+                snap[kv.Key] = kv.Value;
+        return snap;
+    }
+
+    // Konverziók + render
+    private static bool ToBool(Value v) =>
+        v switch
+        {
+            IntVal iv => iv.V != 0,
+            ListVal lv => lv.Items.Count != 0,
+            StrVal sv => !string.IsNullOrEmpty(sv.V),
+            SymVal sm => !string.IsNullOrEmpty(sm.Name),
+            FuncVal => true,
+            _ => false
+        };
+
+    private static int ToInt(Value v) =>
+        v switch
+        {
+            IntVal iv => iv.V,
+            StrVal sv => int.TryParse(sv.V, out var n) ? n : throw new Exception($"Nem egész: \"{sv.V}\""),
+            _ => throw new Exception("Szám szükséges.")
+        };
+
+    private static string Render(Value v) =>
+        v switch
+        {
+            IntVal iv => iv.V.ToString(),
+            StrVal sv => sv.V,
+            SymVal sm => sm.Name,
+            ListVal lv => "(" + string.Join(" ", lv.Items.Select(Render)) + ")",
+            FuncVal => "#<function>",
+            _ => "<unknown>"
+        };
+
+    // ----- TOP -----
+    public override Value VisitProg(LispParser.ProgContext ctx)
+    {
+        Value last = new IntVal(0);
         foreach (var e in ctx.expr())
             last = Visit(e);
         return last;
     }
 
-    public override int VisitNumber(LispParser.NumberContext ctx)
-        => int.Parse(ctx.NUMBER().GetText());
+    public override Value VisitNumber(LispParser.NumberContext ctx)
+        => new IntVal(int.Parse(ctx.NUMBER().GetText()));
 
-    public override int VisitStr(LispParser.StrContext ctx)
-        => 0; // a string értékét jelenleg nem számoljuk, (print) kezeli a kiírást
-
-    private bool TryGetVar(string name, out int value)
+    public override Value VisitStr(LispParser.StrContext ctx)
     {
-        foreach (var scope in envStack)           // top → down
-            if (scope.TryGetValue(name, out value))
-                return true;
-        value = 0;
-        return false;
+        var t = ctx.STRING().GetText();
+        return new StrVal(t.Length >= 2 ? t.Substring(1, t.Length - 2) : "");
     }
 
-    private void SetVar(string name, int value)
-    {
-        // ha már létezik bármelyik scope-ban, oda írjuk vissza; különben a legfelsőbe
-        foreach (var scope in envStack)
-            if (scope.ContainsKey(name)) { scope[name] = value; return; }
-        envStack.Peek()[name] = value;
-    }
-
-    public override int VisitSymbol(LispParser.SymbolContext ctx)
+    public override Value VisitSymbol(LispParser.SymbolContext ctx)
     {
         var name = ctx.ID().GetText();
-        if (!TryGetVar(name, out var v))
+        if (!TryGetVar(name, out var val))
             throw new Exception($"Ismeretlen változó: {name}");
-        return v;
+        return val;
     }
 
-    public override int VisitList(LispParser.ListContext ctx)
-    {
-        string head = ctx.GetChild(1).GetText();
+    // ----- QUOTE -----
+    public override Value VisitQuoteExpr(LispParser.QuoteExprContext ctx)
+        => BuildQuoted(ctx.datum());
 
-        // (print expr+)
-        if (head == "print")
+    private Value BuildQuoted(LispParser.DatumContext d)
+    {
+        if (d.number() != null) return VisitNumber(d.number());
+        if (d.str() != null) return VisitStr(d.str());
+        if (d.symbol() != null) return new SymVal(d.symbol().ID().GetText());
+        if (d.dataList() != null) return BuildQuotedList(d.dataList());
+        throw new Exception("Ismeretlen datum.");
+    }
+
+    private Value BuildQuotedList(LispParser.DataListContext dl)
+    {
+        var items = new List<Value>();
+        foreach (var child in dl.datum())
+            items.Add(BuildQuoted(child));
+        return new ListVal(items);
+    }
+
+    // ----- LIST -----
+    public override Value VisitList(LispParser.ListContext ctx)
+    {
+        var headText = ctx.ChildCount > 1 ? ctx.GetChild(1).GetText() : "";
+
+        // print
+        if (headText == "print")
         {
             foreach (var e in ctx.expr())
-            {
-                if (e.str() != null)
-                    Console.WriteLine(e.GetText().Trim('"'));
-                else
-                    Console.WriteLine(Visit(e));
-            }
-            return 0;
+                Console.WriteLine(Render(Visit(e)));
+            return new IntVal(0);
         }
 
-        // (set ID expr)
-        if (head == "set")
+        // set
+        if (headText == "set")
         {
             string name = ctx.ID(0).GetText();
-            int value = Visit(ctx.expr(0));
+            var value = Visit(ctx.expr(0));
             SetVar(name, value);
             return value;
         }
 
-        // (while (compOp expr expr) expr+)
-        if (head == "while")
-        {
-            var cond = ctx.condition();
-            int guard = 1_000_000; // egyszerű végtelen-ciklus védelem
+        // if
+        if (headText == "if")
+            return EvalCondition(ctx.condition()) ? Visit(ctx.expr(0)) : Visit(ctx.expr(1));
 
-            while (EvalCondition(cond))
+        // logikaiak
+        if (headText == "not")
+            return new IntVal(ToBool(Visit(ctx.expr(0))) ? 0 : 1);
+        if (headText == "and")
+        {
+            foreach (var e in ctx.expr())
+                if (!ToBool(Visit(e)))
+                    return new IntVal(0);
+            return new IntVal(1);
+        }
+        if (headText == "or")
+        {
+            foreach (var e in ctx.expr())
+                if (ToBool(Visit(e)))
+                    return new IntVal(1);
+            return new IntVal(0);
+        }
+
+        // while
+        if (headText == "while")
+        {
+            int guard = 1_000_000;
+            while (EvalCondition(ctx.condition()))
             {
                 foreach (var e in ctx.expr())
                     Visit(e);
-
-                if (--guard == 0)
-                    throw new Exception("Végtelen ciklus gyanúja (iterációs őr aktiválódott).");
+                if (--guard == 0) throw new Exception("Végtelen ciklus?");
             }
-            return 0;
+            return new IntVal(0);
         }
 
-        // (defun name (params...) body+)
-        if (head == "defun")
+        // defun
+        if (headText == "defun")
         {
             string fname = ctx.ID(0).GetText();
-            // ctx.ID(): [fname, p1, p2, ...]
             var paramNames = ctx.ID().Skip(1).Select(t => t.GetText()).ToList();
-            var body = ctx.expr().ToList(); // a defun utáni expr+ a függvény törzse
-            funcs[fname] = (paramNames, body);
-            return 0;
+            var body = ctx.expr().ToList();
+            var closure = SnapshotCurrentEnv();
+            var fn = new FuncVal(paramNames, body, closure);
+            funcs[fname] = fn;
+            SetVar(fname, fn);
+            return new IntVal(0);
         }
 
-        if (head == "if")
+        // lambda
+        if (headText == "lambda")
         {
-            var cond = ctx.condition();
-            return EvalCondition(cond) ? Visit(ctx.expr(0)) : Visit(ctx.expr(1));
+            var paramNames = ctx.ID().Select(t => t.GetText()).ToList();
+            var body = ctx.expr().ToList();
+            var closure = SnapshotCurrentEnv();
+            return new FuncVal(paramNames, body, closure);
         }
 
-        if (head == "not") return Bool(!ToBool(Visit(ctx.expr(0))));
-        if (head == "and") { foreach (var e in ctx.expr()) if (!ToBool(Visit(e))) return 0; return 1; }
-        if (head == "or") { foreach (var e in ctx.expr()) if (ToBool(Visit(e))) return 1; return 0; }
-
-
-        // (+ ...), (* ...), (- ...), (/ ...)
+        // aritmetika
         if (ctx.@operator() != null)
         {
             string op = ctx.@operator().GetText();
             var es = ctx.expr();
 
-            switch (op)
+            return op switch
             {
-                case "+":
-                    {
-                        int sum = 0;
-                        foreach (var e in es) sum += Visit(e);
-                        return sum;
-                    }
-                case "*":
-                    {
-                        int prod = 1;
-                        foreach (var e in es) prod *= Visit(e);
-                        return prod;
-                    }
-                case "-":
-                    {
-                        if (es.Length == 1)
-                        {
-                            // egyoperandusos mínusz (negálás)
-                            return -Visit(es[0]);
-                        }
-                        int acc = Visit(es[0]);
-                        for (int i = 1; i < es.Length; i++)
-                            acc -= Visit(es[i]);
-                        return acc;
-                    }
-                case "/":
-                    {
-                        if (es.Length < 2)
-                            throw new Exception("Az osztáshoz legalább 2 operandus szükséges: (/ a b ...)");
-                        int acc = Visit(es[0]);
-                        for (int i = 1; i < es.Length; i++)
-                        {
-                            int d = Visit(es[i]);
-                            if (d == 0) throw new DivideByZeroException("Osztás nullával.");
-                            acc /= d; // egész osztás
-                        }
-                        return acc;
-                    }
-                default:
-                    throw new Exception($"Ismeretlen operátor: {op}");
-            }
+                "+" => new IntVal(es.Select(e => ToInt(Visit(e))).Sum()),
+                "*" => new IntVal(es.Select(e => ToInt(Visit(e))).Aggregate(1, (a, b) => a * b)),
+                "-" => es.Length == 1
+                        ? new IntVal(-ToInt(Visit(es[0])))
+                        : new IntVal(es.Skip(1).Select(e => ToInt(Visit(e)))
+                                        .Aggregate(ToInt(Visit(es[0])), (a, b) => a - b)),
+                "/" => DivChain(es),
+                _ => throw new Exception($"Ismeretlen operátor: {op}")
+            };
         }
 
-        // (fname args...)  -- függvényhívás
+        // név szerinti hívás
         if (ctx.ID() != null && ctx.ID().Length > 0)
         {
             string fname = ctx.ID(0).GetText();
             if (!funcs.TryGetValue(fname, out var fn))
                 throw new Exception($"Ismeretlen függvény: {fname}");
+            var argVals = ctx.expr().Select(Visit).ToList();
+            return Invoke(fn, argVals);
+        }
 
-            var args = ctx.expr().Select(Visit).ToList();
-            if (args.Count != fn.Params.Count)
-                throw new Exception($"Hibás arg.szám a(z) {fname} hívásban. Várt: {fn.Params.Count}, kapott: {args.Count}");
-
-            // új lokális scope a paraméterekkel
-            var locals = new Dictionary<string, int>(StringComparer.Ordinal);
-            for (int i = 0; i < fn.Params.Count; i++)
-                locals[fn.Params[i]] = args[i];
-
-            envStack.Push(locals);
-            int result = 0;
-            foreach (var bexpr in fn.Body)
-                result = Visit(bexpr);
-            envStack.Pop();
-
-            return result;
+        // általános hívás
+        if (ctx.expr().Length >= 1)
+        {
+            var head = Visit(ctx.expr(0));
+            if (head is not FuncVal fv)
+                throw new Exception("Az első elem nem függvény a hívásban.");
+            var args = ctx.expr().Skip(1).Select(Visit).ToList();
+            return Invoke(fv, args);
         }
 
         throw new Exception("Ismeretlen listaforma.");
     }
 
+    private Value DivChain(LispParser.ExprContext[] es)
+    {
+        if (es.Length < 2) throw new Exception("Osztáshoz min. 2 operandus kell.");
+        int acc = ToInt(Visit(es[0]));
+        for (int i = 1; i < es.Length; i++)
+        {
+            int d = ToInt(Visit(es[i]));
+            if (d == 0) throw new DivideByZeroException("Osztás nullával.");
+            acc /= d;
+        }
+        return new IntVal(acc);
+    }
+
+    private Value Invoke(FuncVal fn, List<Value> args)
+    {
+        if (args.Count != fn.Params.Count)
+            throw new Exception($"Hibás arg.szám: {args.Count}, várt {fn.Params.Count}");
+
+        envStack.Push(new Dictionary<string, Value>(fn.Closure, StringComparer.Ordinal));
+        var locals = new Dictionary<string, Value>(StringComparer.Ordinal);
+        for (int i = 0; i < fn.Params.Count; i++)
+            locals[fn.Params[i]] = args[i];
+        envStack.Push(locals);
+
+        Value result = new IntVal(0);
+        foreach (var e in fn.Body)
+            result = Visit(e);
+
+        envStack.Pop(); // locals
+        envStack.Pop(); // closure
+        return result;
+    }
+
     private bool EvalCondition(LispParser.ConditionContext c)
     {
         string op = c.compOp().GetText();
-        int left = Visit(c.expr(0));
-        int right = Visit(c.expr(1));
+        int left = ToInt(Visit(c.expr(0)));
+        int right = ToInt(Visit(c.expr(1)));
 
         return op switch
         {
@@ -218,7 +298,7 @@ public class EvalVisitor : LispBaseVisitor<int>
             "!=" => left != right,
             "<=" => left <= right,
             ">=" => left >= right,
-            _ => throw new Exception($"Ismeretlen összehasonlító: {op}")
+            _ => false
         };
     }
 }

@@ -11,8 +11,7 @@
     <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
     <PackageReference Include="Antlr4BuildTasks" Version="12.10.0" />
     <PackageReference Include="LLVMSharp" Version="20.1.2" />
-
-        <Antlr4 Include="Lisp.g4"
+    <Antlr4 Include="Lisp.g4"
             TargetLanguage="CSharp"
             Listener="false"
             Visitor="true"

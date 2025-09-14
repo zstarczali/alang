@@ -7,32 +7,52 @@ expr
     | str
     | symbol
     | list
+    | quoteExpr                  // 'datum
     ;
 
 number : NUMBER ;
 str    : STRING ;
 symbol : ID ;
 
-list
-    : '(' operator expr+ ')'              // (+ ...), (* ...), (- ...), (/ ...)
-    | '(' 'print' expr+ ')'               // (print ...)
-    | '(' 'set' ID expr ')'               // (set x 123)
-    | '(' 'while' condition expr+ ')'     // (while (< x 10) (set x (+ x 1)) ...)
-    | '(' 'if' condition expr expr ')'       // <-- ÚJ
-    | '(' 'defun' ID '(' ID* ')' expr+ ')'// (defun fname (a b) ...body...)
-    | '(' 'not' expr ')'
-    | '(' 'and' expr+ ')'
-    | '(' 'or'  expr+ ')'
-    | '(' ID expr* ')'                    // (fname arg1 arg2 ...)
+// --- quote adatstruktúrák ---
+quoteExpr : '\'' datum ;
+
+datum
+    : number
+    | str
+    | symbol
+    | dataList
     ;
 
-condition : '(' compOp expr expr ')' ;    // pl. (< x 10)
+dataList : '(' datum* ')' ;
 
+// --- listák / utasítások / hívások ---
+list
+    : '(' operator expr+ ')'                         // (+ ...), (- ...), (* ...), (/ ...)
+    | '(' 'print' expr+ ')'                          // (print ...)
+    | '(' 'set' ID expr ')'                          // (set x 123)
+    | '(' 'if' condition expr expr ')'               // (if (< x 10) then else)
+    | '(' 'while' condition expr+ ')'                // (while (< x 10) body...)
+    | '(' 'defun' ID '(' ID* ')' expr+ ')'           // (defun name (args...) body...)
+    | '(' 'lambda' '(' ID* ')' expr+ ')'             // (lambda (args...) body...)
+    | '(' 'and' expr+ ')'                            // (and ...)
+    | '(' 'or' expr+ ')'                             // (or ...)
+    | '(' 'not' expr ')'                             // (not ...)
+    | '(' ID expr* ')'                               // név szerinti hívás
+    | '(' expr expr* ')'                             // általános hívás (lambda ...)
+    ;
+
+// --- feltétel ---
+condition : '(' compOp expr expr ')' ;
 compOp   : '<' | '>' | '=' | '!=' | '<=' | '>=' ;
-operator : '+' | '*' | '-' | '/' ;
 
+// --- operátorok ---
+operator : '+' | '-' | '*' | '/' ;
+
+// --- lexer ---
 ID     : [a-zA-Z_][a-zA-Z0-9_]* ;
 NUMBER : [0-9]+ ;
 STRING : '"' (~["\r\n])* '"' ;
-WS     : [ \t\r\n]+ -> skip ;
-COMMENT : ';' ~[\r\n]* -> skip ;
+
+WS      : [ \t\r\n]+ -> skip ;
+COMMENT : ';' ~[\r\n]* -> skip ;   // ;-től sor végéig komment
