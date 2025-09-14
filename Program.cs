@@ -5,6 +5,7 @@ using Antlr4.Runtime;
 
 var input = """
         ; Quote adat
+        (print "Quote adat")
         (print '(1 2 3))
         (print '(a b c))
         (print '())
@@ -14,11 +15,13 @@ var input = """
         (print ())            ; -> ()
 
         ; Logikaiak
+        (print "Logikaiak")
         (print (and 1 2 3))
         (print (or 0 0 0))
         (print (not 0))
 
         ; Aritmetika
+        (print "Aritmetika")
         (print (+ 1 2 3))
         (print (- 10 3 2))
         (print (* 2 3 4))
@@ -32,6 +35,7 @@ var input = """
           (* x y))
 
         ; Lambda / Defun / While
+        (print "Lambda / Defun / While")
         (defun inc (n) (+ n 1))
         (print (inc 41))
 
@@ -59,4 +63,11 @@ var tree = parser.prog();
 var v = new EvalVisitor();
 v.Visit(tree);
 
-Console.ReadKey();
+
+var gen = new LlvmCodeGen("alang");
+gen.Visit(tree);
+gen.WriteOutputs("alang.ll", "alang.bc");
+
+Console.WriteLine("LLVM IR kiírva: alang.ll  és  alang.bc");
+Console.WriteLine("Fordítás/link:\n  clang alang.ll -O2 -o alang\nFuttatás:\n  ./alang");
+// Console.ReadKey();
