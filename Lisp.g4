@@ -28,19 +28,27 @@ dataList : '(' datum* ')' ;
 
 // --- listák / utasítások / hívások ---
 list
-    : '(' operator expr+ ')'                         // (+ ...), (- ...), (* ...), (/ ...)
-    | '(' 'print' expr+ ')'                          // (print ...)
-    | '(' 'set' ID expr ')'                          // (set x 123)
-    | '(' 'if' condition expr expr ')'               // (if (< x 10) then else)
-    | '(' 'while' condition expr+ ')'                // (while (< x 10) body...)
-    | '(' 'defun' ID '(' ID* ')' expr+ ')'           // (defun name (args...) body...)
-    | '(' 'lambda' '(' ID* ')' expr+ ')'             // (lambda (args...) body...)
-    | '(' 'and' expr+ ')'                            // (and ...)
-    | '(' 'or' expr+ ')'                             // (or ...)
-    | '(' 'not' expr ')'                             // (not ...)
-    | '(' ID expr* ')'                               // név szerinti hívás
-    | '(' expr expr* ')'                             // általános hívás (lambda ...)
+    : '(' ')'                                         // ÜRES LISTA KIFEJEZÉS
+    | '(' operator expr+ ')'                          // (+ ...), (- ...), (* ...), (/ ...)
+    | '(' 'print' expr+ ')'                           // (print ...)
+    | '(' 'set' ID expr ')'                           // (set x 123)
+    | '(' 'const' ID expr ')'                         // (const PI 314)
+    | '(' 'if' condition expr expr ')'                // (if (< x 10) then else)
+    | '(' 'while' condition expr+ ')'                 // (while (< x 10) body...)
+    | '(' 'defun' ID '(' ID* ')' expr+ ')'            // (defun name (args...) body...)
+    | '(' 'lambda' '(' ID* ')' expr+ ')'              // (lambda (args...) body...)
+    | '(' 'and' expr+ ')'                             // (and ...)
+    | '(' 'or' expr+ ')'                              // (or ...)
+    | '(' 'not' expr ')'                              // (not ...)
+    | '(' 'quote' expr ')'                            // HOSSZÚ QUOTE FORMA
+    | letForm                                         // (let ((x 1) (y 2)) body...)
+    | '(' ID expr* ')'                                // név szerinti hívás
+    | '(' expr expr* ')'                              // általános hívás (pl. ((lambda ...) args...))
     ;
+
+// --- let ---
+letForm : '(' 'let' '(' letPair* ')' expr+ ')' ;
+letPair : '(' ID expr ')' ;
 
 // --- feltétel ---
 condition : '(' compOp expr expr ')' ;

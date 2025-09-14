@@ -18,6 +18,7 @@ public class EvalVisitor : LispBaseVisitor<Value>
 {
     private readonly Stack<Dictionary<string, Value>> envStack = new();
     private readonly Dictionary<string, FuncVal> funcs = new(StringComparer.Ordinal);
+    private readonly HashSet<string> constVars = new(StringComparer.Ordinal);
 
     public EvalVisitor()
     {
@@ -38,8 +39,12 @@ public class EvalVisitor : LispBaseVisitor<Value>
 
     private void SetVar(string name, Value value)
     {
+        if (constVars.Contains(name))
+            throw new Exception($"Const változó nem módosítható: {name}");
+
         foreach (var scope in envStack)
             if (scope.ContainsKey(name)) { scope[name] = value; return; }
+
         Env[name] = value;
     }
 
@@ -130,10 +135,78 @@ public class EvalVisitor : LispBaseVisitor<Value>
         return new ListVal(items);
     }
 
+    // Általános quote építés expr-ből a hosszú (quote …) formához
+    private Value BuildQuotedFromExpr(LispParser.ExprContext e)
+    {
+        // rövid quote: 'expr  →  (quote expr)
+        // Itt biztonságosan felismerjük úgy, hogy az első gyerek egyetlen `'` token.
+        if (e.ChildCount >= 2 && e.GetChild(0).GetText() == "'"
+            && e.GetChild(1) is LispParser.ExprContext innerQuoted)
+        {
+            return new ListVal(new List<Value> {
+            new SymVal("quote"),
+            BuildQuotedFromExpr(innerQuoted)
+        });
+        }
+
+        // szám, string, szimbólum
+        if (e.number() != null) return VisitNumber(e.number());
+        if (e.str() != null) return VisitStr(e.str());
+        if (e.symbol() != null) return new SymVal(e.symbol().ID().GetText());
+
+        // lista: a benne levő expr-eket rekurzívan, mint ADAT (nem kód) képezzük le
+        if (e.list() != null)
+        {
+            var l = e.list();
+
+            // üres lista kifejezésként: ()
+            if (l.ChildCount == 2) // '(' ')'
+                return new ListVal(new List<Value>());
+
+            var items = new List<Value>();
+            foreach (var sub in l.expr())
+                items.Add(BuildQuotedFromExpr(sub));
+            return new ListVal(items);
+        }
+
+        throw new Exception("Quote-olhatatlan kifejezés.");
+    }
+
+    // ----- LET -----
+    public override Value VisitLetForm(LispParser.LetFormContext ctx)
+    {
+        var locals = new Dictionary<string, Value>(StringComparer.Ordinal);
+        foreach (var p in ctx.letPair())
+        {
+            string name = p.ID().GetText();
+            var val = Visit(p.expr());
+            locals[name] = val;
+        }
+
+        envStack.Push(locals);
+        Value result = new IntVal(0);
+        foreach (var e in ctx.expr())
+            result = Visit(e);
+        envStack.Pop();
+        return result;
+    }
+
     // ----- LIST -----
     public override Value VisitList(LispParser.ListContext ctx)
     {
+        // ÜRES LISTA KIFEJEZÉS: ()
+        if (ctx.ChildCount == 2)
+            return new ListVal(new List<Value>());
+
         var headText = ctx.ChildCount > 1 ? ctx.GetChild(1).GetText() : "";
+
+        // hosszú quote: (quote expr)
+        if (headText == "quote")
+        {
+            // grammar szerint: '(' 'quote' expr ')'
+            var q = ctx.expr(0);
+            return BuildQuotedFromExpr(q);
+        }
 
         // print
         if (headText == "print")
@@ -149,6 +222,18 @@ public class EvalVisitor : LispBaseVisitor<Value>
             string name = ctx.ID(0).GetText();
             var value = Visit(ctx.expr(0));
             SetVar(name, value);
+            return value;
+        }
+
+        // const
+        if (headText == "const")
+        {
+            string name = ctx.ID(0).GetText();
+            if (constVars.Contains(name))
+                throw new Exception($"Const változó már definiálva: {name}");
+            var value = Visit(ctx.expr(0));
+            Env[name] = value;
+            constVars.Add(name);
             return value;
         }
 
@@ -243,12 +328,13 @@ public class EvalVisitor : LispBaseVisitor<Value>
         {
             var head = Visit(ctx.expr(0));
             if (head is not FuncVal fv)
-                throw new Exception("Az első elem nem függvény a hívásban.");
+                throw new Exception($"Az első elem nem függvény a hívásban: {Render(head)}");
             var args = ctx.expr().Skip(1).Select(Visit).ToList();
             return Invoke(fv, args);
         }
 
-        throw new Exception("Ismeretlen listaforma.");
+        // Részletesebb hiba
+        throw new Exception($"Ismeretlen listaforma: {ctx.GetText()}");
     }
 
     private Value DivChain(LispParser.ExprContext[] es)
