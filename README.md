@@ -67,3 +67,28 @@ It has **two execution modes**:
 ;; Lambda + closure works in the interpreter:
 (let ((inc (lambda (n) (+ n 1))))
   (print (inc 41)))
+```
+
+## Requirements
+
+- .NET 8.0 SDK
+- LLVM (native library, matching the LLVMSharp.Interop version)
+
+## Installing LLVM
+  `choco install llvm --version=14.0.6`
+  
+  Then add C:\Program Files\LLVM\bin to your PATH.
+
+## Build & Run
+
+Build and run with .NET:
+
+```bash
+dotnet restore
+dotnet build
+dotnet run
+```
+
+This will:
+  - Run the interpreter.
+  - Emit LLVM IR (alang.ll) and LLVM bitcode (alang.bc).
