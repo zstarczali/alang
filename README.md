@@ -1,4 +1,4 @@
-# Alang – A Tiny Lisp-Like Language with LLVM Backend
+# Alang(One Lang or 1Lang) – A Tiny Lisp-Like Language with LLVM Backend
 
 This project is a toy Lisp-like interpreter and compiler written in **C#** using:
 
