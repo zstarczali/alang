@@ -35,7 +35,7 @@ It has **two execution modes**:
 - Functions: `defun`, recursion
 - Printing (`print` for ints and strings)
 
-⚠️ Currently **`lambda` and closures are not yet supported in the LLVM backend**.
+Currently **`lambda` and closures are not yet supported in the LLVM backend**.
 
 ---
 
